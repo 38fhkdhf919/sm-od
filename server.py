@@ -65,8 +65,9 @@ def get_orders():
         })
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
     print("==================================================")
     print(" 🚀 스마트스토어 주문 정리 웹 서버가 시작되었습니다.")
-    print(" 🌐 접속 주소: http://127.0.0.1:5000")
+    print(f" 🌐 접속 주소: http://0.0.0.0:{port}")
     print("==================================================")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)
