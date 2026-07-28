@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
-# 가동 스케줄 설정 (오늘 7/28부터 5일간: 7/28 ~ 8/1, 매일 오전 10시 ~ 오후 6시 KST)
-SCHEDULE_START_DATE = datetime(2026, 7, 28, 0, 0, 0, tzinfo=KST)
+# 가동 스케줄 설정 (내일 7/29부터 8/1까지 4일간: 매일 오전 10시 ~ 오후 6시 KST)
+SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
 SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
 ACTIVE_START_HOUR = 10  # 오전 10시
 ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
@@ -26,9 +26,11 @@ def is_active_schedule():
     """현재 한국 시간이 지정된 가동 날짜 및 시간대 내에 있는지 검사"""
     now = datetime.now(KST)
     
-    # 1. 5일 가동 기간 검사 (2026-07-28 ~ 2026-08-01)
-    if not (SCHEDULE_START_DATE <= now <= SCHEDULE_END_DATE):
-        return False, f"가동 5일 기간 외/종료됨 (현재 날짜: {now.strftime('%Y-%m-%d')})"
+    # 1. 4일 가동 기간 검사 (2026-07-29 ~ 2026-08-01)
+    if now < SCHEDULE_START_DATE:
+        return False, "가동 기간 전 (시작 예정: 2026-07-29 오전 10:00 KST)"
+    if now > SCHEDULE_END_DATE:
+        return False, "가동 4일 기간 종료됨 (종료일: 2026-08-01)"
     
     # 2. 일일 가동 시간대 검사 (10:00 ~ 18:00 KST)
     if ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
@@ -43,9 +45,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8284334133")
 # 유튜브 API 키 (발급받은 키 - 1~3초 최단시간 즉시 감지)
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCv1dvIBNwOydBORbik16iZWW9c7NG-LCY")
 
-# 감시 대상 유튜브 채널 ID (개인 테스트 채널: @akao11f / UCUaoBr-tZIgdlRtwf4zesmQ)
-CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@akao11f")
-CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCUaoBr-tZIgdlRtwf4zesmQ")
+# 감시 대상 유튜브 채널 ID (업비트 공식 채널: @UpbitOfficial / UCnUVXiMdlPmDI9NAnX1AlGQ)
+CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@UpbitOfficial")
+CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCnUVXiMdlPmDI9NAnX1AlGQ")
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 
 # 감시 주기 (초)
@@ -186,10 +188,10 @@ def monitor_loop():
         save_seen_videos()
         
         start_msg = (
-            f"🤖 [업비트 유튜브 감시 봇 가동 완료]\n"
-            f"📅 가동 스케줄: 7/28 ~ 8/1 (매일 10:00 ~ 18:00 KST)\n"
-            f"📌 감시 채널: {CHANNEL_HANDLE}\n"
-            f"✅ 현재 존재하는 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 영상만 알림 전송)"
+            f"🤖 [업비트 유튜브 감시 봇 대기 모드 진입]\n"
+            f"📅 가동 스케줄: 7/29 ~ 8/1 (4일간, 매일 10:00 ~ 18:00 KST)\n"
+            f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+            f"✅ 업비트 기존 영상 {len(seen_video_ids)}개 등록 완료. (내일 7/29 오전 10시부터 자동 감시가 시작됩니다.)"
         )
         send_telegram_message(start_msg)
     except Exception as e:
