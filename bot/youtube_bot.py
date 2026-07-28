@@ -6,11 +6,35 @@ import logging
 import threading
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify
 import requests
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# KST (한국 표준시 UTC+9)
+KST = timezone(timedelta(hours=9))
+
+# 가동 스케줄 설정 (오늘 7/28부터 5일간: 7/28 ~ 8/1, 매일 오전 10시 ~ 오후 6시 KST)
+SCHEDULE_START_DATE = datetime(2026, 7, 28, 0, 0, 0, tzinfo=KST)
+SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
+ACTIVE_START_HOUR = 10  # 오전 10시
+ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
+
+def is_active_schedule():
+    """현재 한국 시간이 지정된 가동 날짜 및 시간대 내에 있는지 검사"""
+    now = datetime.now(KST)
+    
+    # 1. 5일 가동 기간 검사 (2026-07-28 ~ 2026-08-01)
+    if not (SCHEDULE_START_DATE <= now <= SCHEDULE_END_DATE):
+        return False, f"가동 5일 기간 외/종료됨 (현재 날짜: {now.strftime('%Y-%m-%d')})"
+    
+    # 2. 일일 가동 시간대 검사 (10:00 ~ 18:00 KST)
+    if ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
+        return True, f"가동 시간 중 (현재시간 KST {now.strftime('%H:%M:%S')})"
+    else:
+        return False, f"운영 시간 외 (현재시간 KST {now.strftime('%H:%M')}, 가동시간: 10:00~18:00)"
 
 # 텔레그램 봇 설정 (환경 변수 우선, 기본값 탑재)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8886172557:AAHdRasA0I-wQY1qITtAGm-M7Zfk01xI2_Y")
@@ -146,46 +170,53 @@ def fetch_latest_videos():
     return videos
 
 def monitor_loop():
-    """5~10초 주기로 유튜브 감시하는 메인 루프"""
+    """스케줄 기반 유튜브 감시 메인 루프"""
     global seen_video_ids
     load_seen_videos()
     
-    logging.info(f"🚀 업비트 유튜브 감시 루프 시작 (주기: {CHECK_INTERVAL}초)")
+    logging.info(f"🚀 스케줄 기반 유튜브 감시 루프 시작 (가동시간: 10:00~18:00 KST, 주기: {CHECK_INTERVAL}초)")
     
-    # 첫 실행 시 기존 영상들은 'seen' 처리 (봇 켜지자마자 이전 영상들로 알림 테러 방지)
+    # 가동 시 초기 영상 목록 로드
     initial_videos = fetch_latest_videos()
     if initial_videos and not seen_video_ids:
         for v in initial_videos:
             seen_video_ids.add(v["id"])
         save_seen_videos()
-        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 가동 시작!\n현재 최근 영상 ID: {initial_videos[0]['id']}\n제목: {initial_videos[0]['title']}")
+        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 가동 시작!\n[스케줄: 7/28 ~ 8/1 매일 10:00 ~ 18:00 KST]\n현재 최근 영상 ID: {initial_videos[0]['id']}\n제목: {initial_videos[0]['title']}")
     elif seen_video_ids:
-        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 재가동되었습니다. (감시 중인 기존 영상 수: {len(seen_video_ids)}개)")
+        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 스케줄 루프가 시작되었습니다. (감시 중인 기존 영상 수: {len(seen_video_ids)}개)")
 
     while True:
         try:
-            videos = fetch_latest_videos()
-            for v in videos:
-                v_id = v["id"]
-                if v_id not in seen_video_ids:
-                    logging.info(f"🚨 새 영상 감지!: {v['title']} ({v['link']})")
-                    
-                    # 텔레그램 메시지 구성
-                    msg = (
-                        f"🚨 [업비트 새 영상 등록 알림]\n\n"
-                        f"📌 제목: {v['title']}\n"
-                        f"🔗 링크: {v['link']}\n"
-                        f"⏰ 게시 시간: {v['published']}"
-                    )
-                    
-                    send_telegram_message(msg)
-                    seen_video_ids.add(v_id)
-                    save_seen_videos()
+            is_active, reason = is_active_schedule()
+            
+            if is_active:
+                videos = fetch_latest_videos()
+                for v in videos:
+                    v_id = v["id"]
+                    if v_id not in seen_video_ids:
+                        logging.info(f"🚨 새 영상 감지!: {v['title']} ({v['link']})")
+                        
+                        msg = (
+                            f"🚨 [업비트 새 영상 등록 알림]\n\n"
+                            f"📌 제목: {v['title']}\n"
+                            f"🔗 링크: {v['link']}\n"
+                            f"⏰ 게시 시간: {v['published']}"
+                        )
+                        
+                        send_telegram_message(msg)
+                        seen_video_ids.add(v_id)
+                        save_seen_videos()
+                
+                time.sleep(CHECK_INTERVAL)
+            else:
+                # 가동 시간 외에는 30초 대기 후 시간 다시 확인 (API 쿼터 소모 0)
+                logging.info(f"⏸️ [스케줄 대기] {reason}")
+                time.sleep(30)
             
         except Exception as e:
             logging.error(f"감시 루프 중 에러: {e}")
-            
-        time.sleep(CHECK_INTERVAL)
+            time.sleep(CHECK_INTERVAL)
 
 # Render 배포 및 헬스체크를 위한 Flask 웹 앱
 app = Flask(__name__)
