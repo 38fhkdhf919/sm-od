@@ -223,13 +223,28 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "<h1>Upbit YouTube Monitor Bot is Running!</h1>"
+    is_active, reason = is_active_schedule()
+    now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+    status_html = "<span style='color:green;font-weight:bold;'>🟢 가동 중 (감시 실행 중)</span>" if is_active else "<span style='color:orange;font-weight:bold;'>⏸️ 대기 중 (시간 외)</span>"
+    return f"""
+    <h2>🤖 업비트 유튜브 감시 봇 모니터링</h2>
+    <p><b>한국시간 (KST):</b> {now_kst}</p>
+    <p><b>스케줄 가동 상태:</b> {status_html}</p>
+    <p><b>상세 이유:</b> {reason}</p>
+    <p><b>감시 채널:</b> {CHANNEL_HANDLE}</p>
+    <p><b>감시 주기:</b> {CHECK_INTERVAL}초</p>
+    """
 
 @app.route("/health")
 def health():
+    is_active, reason = is_active_schedule()
+    now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     return jsonify({
         "status": "ok",
-        "monitored_channel": CHANNEL_ID,
+        "current_kst_time": now_kst,
+        "schedule_active": is_active,
+        "schedule_reason": reason,
+        "monitored_channel": CHANNEL_HANDLE,
         "seen_count": len(seen_video_ids),
         "check_interval": CHECK_INTERVAL
     })
