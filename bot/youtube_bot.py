@@ -19,9 +19,9 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8284334133")
 # 유튜브 API 키 (발급받은 키 - 1~3초 최단시간 즉시 감지)
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCv1dvIBNwOydBORbik16iZWW9c7NG-LCY")
 
-# 감시 대상 유튜브 채널 ID (업비트 공식 채널: UCnUVXiMdlPmDI9NAnX1AlGQ)
-CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@UpbitOfficial")
-CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCnUVXiMdlPmDI9NAnX1AlGQ")
+# 감시 대상 유튜브 채널 ID (개인 테스트 채널: @akao11f / UCUaoBr-tZIgdlRtwf4zesmQ)
+CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@akao11f")
+CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCUaoBr-tZIgdlRtwf4zesmQ")
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 
 # 감시 주기 (초)
