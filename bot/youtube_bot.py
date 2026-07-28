@@ -172,12 +172,13 @@ def fetch_latest_videos():
 def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
     global seen_video_ids
-    load_seen_videos()
+    
+    # 봇 가동 시 이전 채널이나 삭제된 영상의 잔재 ID를 제거하기 위해 집합 초기화
+    seen_video_ids = set()
     
     logging.info(f"🚀 스케줄 기반 유튜브 감시 루프 시작 (가동시간: 10:00~18:00 KST, 주기: {CHECK_INTERVAL}초)")
     
-    # 가동 초기화: 현재 채널에 존재하는 모든 기존 영상 ID를 seen_video_ids에 모두 등록
-    # (봇이 처음 켜질 때 기존 영상들이 '새 영상'으로 잘못 알림 가는 현상 완전 방지)
+    # 가동 초기화: 현재 채널에 실제 존재하는 최신 영상 ID를 불러와 등록
     try:
         initial_videos = fetch_latest_videos()
         for v in initial_videos:
@@ -188,7 +189,7 @@ def monitor_loop():
             f"🤖 [업비트 유튜브 감시 봇 가동 완료]\n"
             f"📅 가동 스케줄: 7/28 ~ 8/1 (매일 10:00 ~ 18:00 KST)\n"
             f"📌 감시 채널: {CHANNEL_HANDLE}\n"
-            f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 영상만 알림 전송)"
+            f"✅ 현재 존재하는 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 영상만 알림 전송)"
         )
         send_telegram_message(start_msg)
     except Exception as e:
