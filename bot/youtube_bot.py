@@ -176,15 +176,23 @@ def monitor_loop():
     
     logging.info(f"🚀 스케줄 기반 유튜브 감시 루프 시작 (가동시간: 10:00~18:00 KST, 주기: {CHECK_INTERVAL}초)")
     
-    # 가동 시 초기 영상 목록 로드
-    initial_videos = fetch_latest_videos()
-    if initial_videos and not seen_video_ids:
+    # 가동 초기화: 현재 채널에 존재하는 모든 기존 영상 ID를 seen_video_ids에 모두 등록
+    # (봇이 처음 켜질 때 기존 영상들이 '새 영상'으로 잘못 알림 가는 현상 완전 방지)
+    try:
+        initial_videos = fetch_latest_videos()
         for v in initial_videos:
             seen_video_ids.add(v["id"])
         save_seen_videos()
-        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 가동 시작!\n[스케줄: 7/28 ~ 8/1 매일 10:00 ~ 18:00 KST]\n현재 최근 영상 ID: {initial_videos[0]['id']}\n제목: {initial_videos[0]['title']}")
-    elif seen_video_ids:
-        send_telegram_message(f"🤖 업비트 유튜브 감시 봇 스케줄 루프가 시작되었습니다. (감시 중인 기존 영상 수: {len(seen_video_ids)}개)")
+        
+        start_msg = (
+            f"🤖 [업비트 유튜브 감시 봇 가동 완료]\n"
+            f"📅 가동 스케줄: 7/28 ~ 8/1 (매일 10:00 ~ 18:00 KST)\n"
+            f"📌 감시 채널: {CHANNEL_HANDLE}\n"
+            f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 영상만 알림 전송)"
+        )
+        send_telegram_message(start_msg)
+    except Exception as e:
+        logging.error(f"초기 영상 목록 설정 에러: {e}")
 
     while True:
         try:
@@ -210,8 +218,8 @@ def monitor_loop():
                 
                 time.sleep(CHECK_INTERVAL)
             else:
-                # 가동 시간 외에는 30초 대기 후 시간 다시 확인 (API 쿼터 소모 0)
-                logging.info(f"⏸️ [스케줄 대기] {reason}")
+                # 10:00~18:00 가동 시간이 아닐 때는 유튜브 API 호출을 전혀 하지 않고 30초 간격 대기
+                logging.info(f"⏸️ [스케줄 대기 - API 호출 중단] {reason}")
                 time.sleep(30)
             
         except Exception as e:
