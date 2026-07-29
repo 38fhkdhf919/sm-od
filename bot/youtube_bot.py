@@ -23,10 +23,19 @@ ACTIVE_START_HOUR = 10  # 오전 10시
 ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
 
 current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED"
+manual_off_until = None  # 방장의 수동 종료(OFF) 유지 시각
 
 def get_schedule_status():
     """현재 한국 시각 기준 봇 가동 상태 및 이유 판별"""
+    global manual_off_until
     now = datetime.now(KST)
+    
+    # 방장의 수동 종료(/off)가 설정되어 있고 아직 해제 시각 전이면 무조건 IDLE(대기) 상태 유지
+    if manual_off_until:
+        if now < manual_off_until:
+            return "IDLE", "방장 수동 종료 (대기 모드)", f"다음 자동 가동 예정 시각: {manual_off_until.strftime('%m월 %d일')} 오전 10시 00분"
+        else:
+            manual_off_until = None  # 시간이 지나면 수동 종료 해제
     
     if now < SCHEDULE_START_DATE:
         return "IDLE", "가동 기간 전", f"가동 시작 예정일: {SCHEDULE_START_DATE.strftime('%m월 %d일')} 오전 10시 00분"
@@ -133,7 +142,7 @@ def fetch_latest_videos():
 
 def telegram_command_listener():
     """텔레그램 단톡방 명령어 수신 스레드 (/off, /on, /상태)"""
-    global current_bot_mode
+    global current_bot_mode, manual_off_until
     offset = 0
     
     while True:
@@ -159,14 +168,13 @@ def telegram_command_listener():
                     if text in ["/off", "off", "종료", "끝"]:
                         if sender_id == ADMIN_USER_ID or sender_id == "":
                             now = datetime.now(KST)
-                            next_time = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
-                            
+                            manual_off_until = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
                             current_bot_mode = "IDLE"
                             msg = (
                                 f"⏸️ [방장 명령으로 오늘 감시 종료]\n\n"
-                                f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 대기 모드로 전환합니다.\n"
+                                f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 내일 오전 10시까지 대기 모드로 전환합니다.\n"
                                 f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
-                                f"⏳ 다음 자동 가동 시각: {next_time}\n"
+                                f"⏳ 다음 자동 가동 시각: {manual_off_until.strftime('%m월 %d일')} 오전 10시 00분\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
                             )
                             send_telegram_message(msg)
@@ -177,16 +185,20 @@ def telegram_command_listener():
                     # 2. 시작 명령 (on, /on, 시작, 가동) - 방장 전용
                     elif text in ["/on", "on", "시작", "가동"]:
                         if sender_id == ADMIN_USER_ID or sender_id == "":
-                            now = datetime.now(KST)
+                            manual_off_until = None  # 수동 종료 해제
                             current_bot_mode = "MONITORING"
+                            now = datetime.now(KST)
                             msg = (
                                 f"🟢 [방장 명령으로 실시간 감시 시작]\n\n"
-                                f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 시작합니다.\n"
+                                f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 다시 시작합니다.\n"
                                 f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                                 f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
                             )
                             send_telegram_message(msg)
+                        else:
+                            if chat_id == TELEGRAM_CHAT_ID:
+                                send_telegram_message("⚠️ 감시 시작 명령어는 방장(관리자)만 실행할 수 있습니다.")
                         else:
                             if chat_id == TELEGRAM_CHAT_ID:
                                 send_telegram_message("⚠️ 감시 시작 명령어는 방장(관리자)만 실행할 수 있습니다.")
