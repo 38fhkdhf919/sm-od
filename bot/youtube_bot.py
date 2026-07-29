@@ -16,27 +16,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
-# 가동 스케줄 설정 (내일 7/29부터 8/1까지 4일간: 매일 오전 10시 ~ 오후 6시 KST)
-SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
-SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
-ACTIVE_START_HOUR = 10  # 오전 10시
-ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
-
 def is_active_schedule():
-    """현재 한국 시간이 지정된 가동 날짜 및 시간대 내에 있는지 검사"""
-    now = datetime.now(KST)
-    
-    # 1. 4일 가동 기간 검사 (2026-07-29 ~ 2026-08-01)
-    if now < SCHEDULE_START_DATE:
-        return False, "가동 기간 전 (시작 예정: 2026-07-29 오전 10:00 KST)"
-    if now > SCHEDULE_END_DATE:
-        return False, "가동 4일 기간 종료됨 (종료일: 2026-08-01)"
-    
-    # 2. 일일 가동 시간대 검사 (10:00 ~ 18:00 KST)
-    if ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
-        return True, f"가동 시간 중 (현재시간 KST {now.strftime('%H:%M:%S')})"
-    else:
-        return False, f"운영 시간 외 (현재시간 KST {now.strftime('%H:%M')}, 가동시간: 10:00~18:00)"
+    """상시 24시간 감시 (날짜/시간 제한 없음)"""
+    return True, "상시 24시간 가동 중 (제한 없음)"
 
 # 텔레그램 봇 설정 (환경 변수 우선, 기본값 탑재)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8886172557:AAHdRasA0I-wQY1qITtAGm-M7Zfk01xI2_Y")
@@ -92,16 +74,15 @@ def send_telegram_message(text):
         logging.error(f"텔레그램 전송 예외 발생: {e}")
 
 def fetch_latest_videos():
-    """유튜브 최신 영상 감지 (공식 API v3 지원 & Anti-Cache 스크래핑 백업)"""
+    """유튜브 최신 영상 및 쇼츠 통합 감지 (공식 API + HTML 크롤링)"""
     videos = []
     seen_in_fetch = set()
     
-    # 1. YouTube Data API v3 사용 (API 키가 등록되어 있으면 100% 최우선 초고속 감지)
+    # 1. YouTube Data API v3 사용 (재생목록 최우선 조회)
     if YOUTUBE_API_KEY:
         try:
-            # 채널의 업로드 전용 재생목록 ID (UC... -> UU...)
             uploads_playlist_id = "UU" + CHANNEL_ID[2:] if CHANNEL_ID.startswith("UC") else CHANNEL_ID
-            api_url = f"https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId={uploads_playlist_id}&maxResults=5&key={YOUTUBE_API_KEY}"
+            api_url = f"https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId={uploads_playlist_id}&maxResults=10&key={YOUTUBE_API_KEY}"
             
             req = urllib.request.Request(api_url)
             with urllib.request.urlopen(req, timeout=5) as response:
@@ -120,12 +101,10 @@ def fetch_latest_videos():
                             "link": f"https://www.youtube.com/watch?v={v_id}",
                             "published": published
                         })
-                if videos:
-                    return videos
         except Exception as e:
-            logging.error(f"유튜브 API v3 호출 실패 (웹 스크래핑으로 전환): {e}")
+            logging.error(f"유튜브 API v3 호출 실패: {e}")
 
-    # 2. 웹페이지 캐시 우회 스크래핑 (API 키가 없을 때 백업)
+    # 2. /shorts 및 /videos HTML 직접 교차 크롤링 (쇼츠 전용 탭 100% 탐지)
     ts = int(time.time() * 1000)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -188,10 +167,10 @@ def monitor_loop():
         save_seen_videos()
         
         start_msg = (
-            f"🤖 [업비트 유튜브 감시 봇 대기 모드 진입]\n"
-            f"📅 가동 스케줄: 7/29 ~ 8/1 (4일간, 매일 10:00 ~ 18:00 KST)\n"
+            f"🤖 [업비트 유튜브 감시 봇 실시간 가동 시작]\n"
+            f"⏰ 운영 스케줄: 24시간 상시 감시 중 (날짜/시간 제한 없음)\n"
             f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
-            f"✅ 업비트 기존 영상 {len(seen_video_ids)}개 등록 완료. (내일 7/29 오전 10시부터 자동 감시가 시작됩니다.)"
+            f"✅ 업비트 기존 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 일반 영상 및 쇼츠 즉시 알림)"
         )
         send_telegram_message(start_msg)
     except Exception as e:
