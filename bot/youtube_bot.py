@@ -64,9 +64,9 @@ ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID", "8284334133")         # 방장(�
 # 유튜브 API 키 (발급받은 키 - 1~3초 최단시간 즉시 감지)
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCv1dvIBNwOydBORbik16iZWW9c7NG-LCY")
 
-# 감시 대상 유튜브 채널 ID (업비트 공식 채널: @UpbitOfficial / UCnUVXiMdlPmDI9NAnX1AlGQ)
-CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@UpbitOfficial")
-CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCnUVXiMdlPmDI9NAnX1AlGQ")
+# 감시 대상 유튜브 채널 ID (기본값: 개인 테스트 채널 @akao11f / UCUaoBr-tZIgdlRtwf4zesmQ)
+CHANNEL_HANDLE = os.environ.get("YOUTUBE_CHANNEL_HANDLE", "@akao11f")
+CHANNEL_ID = os.environ.get("YOUTUBE_CHANNEL_ID", "UCUaoBr-tZIgdlRtwf4zesmQ")
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 
 # 감시 주기 (초)
@@ -175,7 +175,7 @@ def telegram_command_listener():
                                 f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 내일 오전 10시까지 대기 모드로 전환합니다.\n"
                                 f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
                                 f"⏳ 다음 자동 가동 시각: {manual_off_until.strftime('%m월 %d일')} 오전 10시 00분\n"
-                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)"
                             )
                             send_telegram_message(msg)
                         else:
@@ -193,7 +193,7 @@ def telegram_command_listener():
                                 f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 다시 시작합니다.\n"
                                 f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                                 f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
-                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)"
                             )
                             send_telegram_message(msg)
                         else:
@@ -212,7 +212,7 @@ def telegram_command_listener():
                                 f"🤖 [업비트 감시 봇 현재 상태]\n\n"
                                 f"🟢 현재 모드: 실시간 감시 모드 가동 중 (5초 주기)\n"
                                 f"⏳ 감시 마감 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
-                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                                 f"💡 방장님 전용: '/off'로 대기 전환 가능"
                             )
                         else:
@@ -221,7 +221,7 @@ def telegram_command_listener():
                                 f"🤖 [업비트 감시 봇 현재 상태]\n\n"
                                 f"⏸️ 현재 모드: 대기 모드 (API 쿼터 소모 0)\n"
                                 f"⏳ 다음 자동 가동 시각: {next_time}\n"
-                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                                 f"💡 방장님 전용: '/on'으로 수동 시작 가능"
                             )
                         send_telegram_message(status_msg)
@@ -261,7 +261,7 @@ def monitor_loop():
                         f"🟢 [업비트 감시 봇 가동 시작]\n\n"
                         f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
-                        f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                        f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                         f"💡 방장님 전용: '/off' 입력 시 대기 전환, '/on' 입력 시 수동 시작\n"
                         f"💡 단톡방 전용: '/상태' 입력 시 현재 모드 확인\n"
                         f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료."
@@ -274,7 +274,7 @@ def monitor_loop():
                         f"⏸️ [업비트 감시 봇 대기 모드 전환]\n\n"
                         f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
                         f"⏳ 다음 자동 가동 시각: {next_time}\n"
-                        f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                        f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)"
                     )
                     send_telegram_message(msg)
                     
