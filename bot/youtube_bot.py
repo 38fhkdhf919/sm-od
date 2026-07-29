@@ -101,9 +101,8 @@ def send_telegram_message(text):
         logging.error(f"텔레그램 전송 예외 발생: {e}")
 
 def fetch_latest_videos():
-    """유튜브 최신 영상 감지 (공식 API v3 재생목록 조회)"""
+    """유튜브 공식 Data API v3 업로드 재생목록 전용 초고속 감지"""
     videos = []
-    seen_in_fetch = set()
     
     if YOUTUBE_API_KEY:
         try:
@@ -116,11 +115,10 @@ def fetch_latest_videos():
                 for item in res_data.get("items", []):
                     snippet = item.get("snippet", {})
                     v_id = snippet.get("resourceId", {}).get("videoId")
-                    title = snippet.get("title", "새 유튜브 영상")
+                    title = snippet.get("title", "업비트 새 영상")
                     published = snippet.get("publishedAt", "실시간 감지")
                     
-                    if v_id and v_id not in seen_in_fetch:
-                        seen_in_fetch.add(v_id)
+                    if v_id:
                         videos.append({
                             "id": v_id,
                             "title": title,
@@ -131,21 +129,6 @@ def fetch_latest_videos():
             logging.error(f"유튜브 API v3 호출 실패: {e}")
 
     return videos
-
-def is_short_video(v_id):
-    """해당 영상이 쇼츠(Shorts)인지 여부를 판별 (쇼츠 URL 접속 시 /shorts/ 유지 여부 확인)"""
-    try:
-        url = f"https://www.youtube.com/shorts/{v_id}"
-        req = urllib.request.Request(
-            url,
-            method="HEAD",
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        )
-        with urllib.request.urlopen(req, timeout=3) as res:
-            return "/shorts/" in res.geturl()
-    except Exception as e:
-        logging.error(f"쇼츠 판별 중 에러: {e}")
-        return False
 
 def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
@@ -175,11 +158,10 @@ def monitor_loop():
                 if mode == "MONITORING":
                     msg = (
                         f"🟢 [업비트 감시 봇 가동 시작]\n\n"
-                        f"⏰ 현재 상태: 초고속 실시간 감시 실행 중 (5초 주기)\n"
+                        f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
-                        f"🚫 감시 대상: 일반 영상 전용 (쇼츠 영상 자동 제외)\n"
-                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료."
+                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (유튜브 API 감지 시 즉시 알림)"
                     )
                     send_telegram_message(msg)
                     
@@ -206,14 +188,7 @@ def monitor_loop():
                 for v in videos:
                     v_id = v["id"]
                     if v_id not in seen_video_ids:
-                        # 쇼츠 영상 필터링 (쇼츠인 경우 알림 없이 감시 처리만 하고 스킵)
-                        if is_short_video(v_id):
-                            logging.info(f"🚫 [쇼츠 제외] '{v['title']}' ({v_id}) 영상은 쇼츠이므로 알림을 보내지 않습니다.")
-                            seen_video_ids.add(v_id)
-                            save_seen_videos()
-                            continue
-
-                        logging.info(f"🚨 일반 새 영상 감지!: {v['title']} ({v['link']})")
+                        logging.info(f"🚨 유튜브 API 새 영상 감지!: {v['title']} ({v['link']})")
                         
                         msg = (
                             f"🚨 [업비트 새 영상 등록 알림]\n\n"
