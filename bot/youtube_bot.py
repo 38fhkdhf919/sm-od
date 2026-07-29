@@ -199,9 +199,6 @@ def telegram_command_listener():
                         else:
                             if chat_id == TELEGRAM_CHAT_ID:
                                 send_telegram_message("⚠️ 감시 시작 명령어는 방장(관리자)만 실행할 수 있습니다.")
-                        else:
-                            if chat_id == TELEGRAM_CHAT_ID:
-                                send_telegram_message("⚠️ 감시 시작 명령어는 방장(관리자)만 실행할 수 있습니다.")
 
                     # 3. 상태 확인 명령 (상태, /상태, status, /status) - 단톡방 참가자 누구나 가능!
                     elif text in ["/상태", "상태", "/status", "status"]:
