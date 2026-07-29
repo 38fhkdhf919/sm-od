@@ -132,6 +132,21 @@ def fetch_latest_videos():
 
     return videos
 
+def is_short_video(v_id):
+    """해당 영상이 쇼츠(Shorts)인지 여부를 판별 (쇼츠 URL 접속 시 /shorts/ 유지 여부 확인)"""
+    try:
+        url = f"https://www.youtube.com/shorts/{v_id}"
+        req = urllib.request.Request(
+            url,
+            method="HEAD",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as res:
+            return "/shorts/" in res.geturl()
+    except Exception as e:
+        logging.error(f"쇼츠 판별 중 에러: {e}")
+        return False
+
 def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
     global seen_video_ids, current_bot_mode
@@ -163,7 +178,8 @@ def monitor_loop():
                         f"⏰ 현재 상태: 초고속 실시간 감시 실행 중 (5초 주기)\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
-                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (신규 영상 등록 시 즉시 알림)"
+                        f"🚫 감시 대상: 일반 영상 전용 (쇼츠 영상 자동 제외)\n"
+                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료."
                     )
                     send_telegram_message(msg)
                     
@@ -190,7 +206,14 @@ def monitor_loop():
                 for v in videos:
                     v_id = v["id"]
                     if v_id not in seen_video_ids:
-                        logging.info(f"🚨 새 영상 감지!: {v['title']} ({v['link']})")
+                        # 쇼츠 영상 필터링 (쇼츠인 경우 알림 없이 감시 처리만 하고 스킵)
+                        if is_short_video(v_id):
+                            logging.info(f"🚫 [쇼츠 제외] '{v['title']}' ({v_id}) 영상은 쇼츠이므로 알림을 보내지 않습니다.")
+                            seen_video_ids.add(v_id)
+                            save_seen_videos()
+                            continue
+
+                        logging.info(f"🚨 일반 새 영상 감지!: {v['title']} ({v['link']})")
                         
                         msg = (
                             f"🚨 [업비트 새 영상 등록 알림]\n\n"
