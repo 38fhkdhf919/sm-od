@@ -47,9 +47,10 @@ def is_active_schedule():
     mode, status_text, detail = get_schedule_status()
     return (mode == "MONITORING"), f"{status_text} ({detail})"
 
-# 텔레그램 봇 설정 (환경 변수 우선, 기본값 탑재)
+# 텔레그램 봇 및 단톡방/관리자 설정 (환경 변수 우선, 기본값 탑재)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8886172557:AAHdRasA0I-wQY1qITtAGm-M7Zfk01xI2_Y")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8284334133")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-5452529899")  # 텔레그램 단톡방 Chat ID
+ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID", "8284334133")         # 방장(관리자) 고유 User ID
 
 # 유튜브 API 키 (발급받은 키 - 1~3초 최단시간 즉시 감지)
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCv1dvIBNwOydBORbik16iZWW9c7NG-LCY")
@@ -130,6 +131,52 @@ def fetch_latest_videos():
 
     return videos
 
+def telegram_command_listener():
+    """텔레그램 단톡방 방장 전용 종료 명령어 수신 스레드 (/off, 종료 명령)"""
+    global current_bot_mode
+    offset = 0
+    
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=10"
+            res = requests.get(url, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    message = update.get("message") or update.get("channel_post")
+                    if not message:
+                        continue
+                    
+                    text = message.get("text", "").strip().lower()
+                    sender_id = str(message.get("from", {}).get("id", ""))
+                    chat_id = str(message.get("chat", {}).get("id", ""))
+                    
+                    # 종료 명령 키워드 검사
+                    if text in ["/off", "off", "종료", "끝"]:
+                        if sender_id == ADMIN_USER_ID or sender_id == "":
+                            now = datetime.now(KST)
+                            next_time = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
+                            
+                            current_bot_mode = "IDLE"
+                            msg = (
+                                f"⏸️ [방장 명령으로 오늘 감시 종료]\n\n"
+                                f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 대기 모드로 전환합니다.\n"
+                                f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
+                                f"⏳ 다음 자동 가동 시각: {next_time}\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                            )
+                            send_telegram_message(msg)
+                        else:
+                            # 일반 단톡방 참가자가 명령어를 쳤을 때
+                            if chat_id == TELEGRAM_CHAT_ID:
+                                send_telegram_message("⚠️ 오늘 감시 종료 명령어는 방장(관리자)만 실행할 수 있습니다.")
+                                
+        except Exception as e:
+            logging.error(f"텔레그램 명령어 수신 중 에러: {e}")
+            
+        time.sleep(1)
+
 def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
     global seen_video_ids, current_bot_mode
@@ -161,6 +208,7 @@ def monitor_loop():
                         f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                        f"💡 방장님 전용 팁: 오늘 이벤트가 끝났으면 단톡방에 '/off' 또는 '종료'를 입력하세요!\n"
                         f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (유튜브 API 감지 시 즉시 알림)"
                     )
                     send_telegram_message(msg)
@@ -200,6 +248,17 @@ def monitor_loop():
                         send_telegram_message(msg)
                         seen_video_ids.add(v_id)
                         save_seen_videos()
+                        
+                        # 오늘 새 영상 1개 알림이 전송된 후 자동 대기 모드 전환 안내
+                        next_time = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
+                        auto_idle_msg = (
+                            f"🎉 오늘 새 영상 알림 전송이 완료되었습니다!\n"
+                            f"오늘 가동을 자동 종료하고 대기 모드로 들어갑니다.\n"
+                            f"⏳ 다음 자동 가동 시각: {next_time}"
+                        )
+                        send_telegram_message(auto_idle_msg)
+                        current_bot_mode = "IDLE"
+                        break
                 
                 time.sleep(CHECK_INTERVAL)
             else:
@@ -209,6 +268,10 @@ def monitor_loop():
         except Exception as e:
             logging.error(f"감시 루프 중 에러: {e}")
             time.sleep(CHECK_INTERVAL)
+
+# 백그라운드 명령어 수신 스레드 시작
+cmd_thread = threading.Thread(target=telegram_command_listener, daemon=True)
+cmd_thread.start()
 
 # Render 배포 및 헬스체크를 위한 Flask 웹 앱
 app = Flask(__name__)
