@@ -132,7 +132,7 @@ def fetch_latest_videos():
     return videos
 
 def telegram_command_listener():
-    """텔레그램 단톡방 방장 전용 종료 명령어 수신 스레드 (/off, 종료 명령)"""
+    """텔레그램 단톡방 명령어 수신 스레드 (/off, /on, /상태)"""
     global current_bot_mode
     offset = 0
     
@@ -149,10 +149,13 @@ def telegram_command_listener():
                         continue
                     
                     text = message.get("text", "").strip().lower()
+                    if "@" in text:
+                        text = text.split("@")[0]
+                        
                     sender_id = str(message.get("from", {}).get("id", ""))
                     chat_id = str(message.get("chat", {}).get("id", ""))
                     
-                    # 종료 명령 키워드 검사
+                    # 1. 종료 명령 (off, /off, 종료, 끝) - 방장 전용
                     if text in ["/off", "off", "종료", "끝"]:
                         if sender_id == ADMIN_USER_ID or sender_id == "":
                             now = datetime.now(KST)
@@ -168,9 +171,51 @@ def telegram_command_listener():
                             )
                             send_telegram_message(msg)
                         else:
-                            # 일반 단톡방 참가자가 명령어를 쳤을 때
                             if chat_id == TELEGRAM_CHAT_ID:
                                 send_telegram_message("⚠️ 오늘 감시 종료 명령어는 방장(관리자)만 실행할 수 있습니다.")
+
+                    # 2. 시작 명령 (on, /on, 시작, 가동) - 방장 전용
+                    elif text in ["/on", "on", "시작", "가동"]:
+                        if sender_id == ADMIN_USER_ID or sender_id == "":
+                            now = datetime.now(KST)
+                            current_bot_mode = "MONITORING"
+                            msg = (
+                                f"🟢 [방장 명령으로 실시간 감시 시작]\n\n"
+                                f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 시작합니다.\n"
+                                f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
+                                f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                            )
+                            send_telegram_message(msg)
+                        else:
+                            if chat_id == TELEGRAM_CHAT_ID:
+                                send_telegram_message("⚠️ 감시 시작 명령어는 방장(관리자)만 실행할 수 있습니다.")
+
+                    # 3. 상태 확인 명령 (상태, /상태, status, /status) - 단톡방 참가자 누구나 가능!
+                    elif text in ["/상태", "상태", "/status", "status"]:
+                        now = datetime.now(KST)
+                        mode, status_text, detail = get_schedule_status()
+                        
+                        effective_mode = current_bot_mode if current_bot_mode else mode
+                        
+                        if effective_mode == "MONITORING":
+                            status_msg = (
+                                f"🤖 [업비트 감시 봇 현재 상태]\n\n"
+                                f"🟢 현재 모드: 실시간 감시 모드 가동 중 (5초 주기)\n"
+                                f"⏳ 감시 마감 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                                f"💡 방장님 전용: '/off'로 대기 전환 가능"
+                            )
+                        else:
+                            next_time = detail.replace("다음 자동 가동 예정 시각: ", "")
+                            status_msg = (
+                                f"🤖 [업비트 감시 봇 현재 상태]\n\n"
+                                f"⏸️ 현재 모드: 대기 모드 (API 쿼터 소모 0)\n"
+                                f"⏳ 다음 자동 가동 시각: {next_time}\n"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                                f"💡 방장님 전용: '/on'으로 수동 시작 가능"
+                            )
+                        send_telegram_message(status_msg)
                                 
         except Exception as e:
             logging.error(f"텔레그램 명령어 수신 중 에러: {e}")
@@ -208,8 +253,9 @@ def monitor_loop():
                         f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
-                        f"💡 방장님 전용 팁: 오늘 이벤트가 끝났으면 단톡방에 '/off' 또는 '종료'를 입력하세요!\n"
-                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (유튜브 API 감지 시 즉시 알림)"
+                        f"💡 방장님 전용: '/off' 입력 시 대기 전환, '/on' 입력 시 수동 시작\n"
+                        f"💡 단톡방 전용: '/상태' 입력 시 현재 모드 확인\n"
+                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료."
                     )
                     send_telegram_message(msg)
                     
@@ -248,17 +294,6 @@ def monitor_loop():
                         send_telegram_message(msg)
                         seen_video_ids.add(v_id)
                         save_seen_videos()
-                        
-                        # 오늘 새 영상 1개 알림이 전송된 후 자동 대기 모드 전환 안내
-                        next_time = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
-                        auto_idle_msg = (
-                            f"🎉 오늘 새 영상 알림 전송이 완료되었습니다!\n"
-                            f"오늘 가동을 자동 종료하고 대기 모드로 들어갑니다.\n"
-                            f"⏳ 다음 자동 가동 시각: {next_time}"
-                        )
-                        send_telegram_message(auto_idle_msg)
-                        current_bot_mode = "IDLE"
-                        break
                 
                 time.sleep(CHECK_INTERVAL)
             else:
