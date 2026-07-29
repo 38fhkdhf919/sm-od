@@ -16,9 +16,36 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
+# 가동 스케줄 설정 (오늘 7/29부터 8/1까지 4일간: 매일 오전 10시 ~ 오후 6시 KST)
+SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
+SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
+ACTIVE_START_HOUR = 10  # 오전 10시
+ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
+
+current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED"
+
+def get_schedule_status():
+    """현재 한국 시각 기준 봇 가동 상태 및 이유 판별"""
+    now = datetime.now(KST)
+    
+    if now < SCHEDULE_START_DATE:
+        return "IDLE", "가동 기간 전", f"가동 시작 예정일: {SCHEDULE_START_DATE.strftime('%m월 %d일')} 오전 10시 00분"
+    
+    if now > SCHEDULE_END_DATE:
+        return "EXPIRED", "가동 스케줄 만료", "4일간의 가동 스케줄이 모두 완료되었습니다."
+    
+    if ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
+        return "MONITORING", "실시간 감시 가동 중", f"오늘({now.strftime('%m/%d')}) 오후 18시 00분까지 감시 실행"
+    else:
+        if now.hour >= ACTIVE_END_HOUR:
+            next_wake = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
+        else:
+            next_wake = now.strftime("%m월 %d일") + " 오전 10시 00분"
+        return "IDLE", "대기 모드", f"다음 자동 가동 예정 시각: {next_wake}"
+
 def is_active_schedule():
-    """상시 24시간 감시 (날짜/시간 제한 없음)"""
-    return True, "상시 24시간 가동 중 (제한 없음)"
+    mode, status_text, detail = get_schedule_status()
+    return (mode == "MONITORING"), f"{status_text} ({detail})"
 
 # 텔레그램 봇 설정 (환경 변수 우선, 기본값 탑재)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8886172557:AAHdRasA0I-wQY1qITtAGm-M7Zfk01xI2_Y")
@@ -74,11 +101,10 @@ def send_telegram_message(text):
         logging.error(f"텔레그램 전송 예외 발생: {e}")
 
 def fetch_latest_videos():
-    """유튜브 최신 영상 및 쇼츠 통합 감지 (공식 API + HTML 크롤링)"""
+    """유튜브 최신 영상 감지 (공식 API v3 재생목록 조회)"""
     videos = []
     seen_in_fetch = set()
     
-    # 1. YouTube Data API v3 사용 (재생목록 최우선 조회)
     if YOUTUBE_API_KEY:
         try:
             uploads_playlist_id = "UU" + CHANNEL_ID[2:] if CHANNEL_ID.startswith("UC") else CHANNEL_ID
@@ -104,83 +130,62 @@ def fetch_latest_videos():
         except Exception as e:
             logging.error(f"유튜브 API v3 호출 실패: {e}")
 
-    # 2. /shorts 및 /videos HTML 직접 교차 크롤링 (쇼츠 전용 탭 100% 탐지)
-    ts = int(time.time() * 1000)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
-        "Pragma": "no-cache"
-    }
-
-    channel_target = CHANNEL_HANDLE if CHANNEL_HANDLE.startswith("@") else f"channel/{CHANNEL_ID}"
-    
-    for path in ["/shorts", "/videos"]:
-        try:
-            url = f"https://www.youtube.com/{channel_target}{path}?t={ts}&nocache={ts}"
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=4) as response:
-                html = response.read().decode("utf-8")
-            
-            video_ids = list(dict.fromkeys(re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)))
-            for v_id in video_ids:
-                if v_id not in seen_in_fetch:
-                    seen_in_fetch.add(v_id)
-                    
-                    title = "새 유튜브 영상"
-                    pos = html.find(f'"videoId":"{v_id}"')
-                    if pos != -1:
-                        snippet = html[pos:pos+1200]
-                        t_match = re.search(r'"text":"([^"]+)"', snippet) or re.search(r'"simpleText":"([^"]+)"', snippet)
-                        if t_match:
-                            try:
-                                title = t_match.group(1).encode("utf-8").decode("unicode_escape", errors="ignore")
-                            except Exception:
-                                title = t_match.group(1)
-                    
-                    link = f"https://www.youtube.com/shorts/{v_id}" if path == "/shorts" else f"https://www.youtube.com/watch?v={v_id}"
-                    videos.append({
-                        "id": v_id,
-                        "title": title,
-                        "link": link,
-                        "published": "초단위 실시간 감지"
-                    })
-        except Exception as e:
-            logging.error(f"유튜브 HTML {path} 스크래핑 에러: {e}")
-
     return videos
 
 def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
-    global seen_video_ids
+    global seen_video_ids, current_bot_mode
     
-    # 봇 가동 시 이전 채널이나 삭제된 영상의 잔재 ID를 제거하기 위해 집합 초기화
     seen_video_ids = set()
+    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 10:00~18:00 KST)")
     
-    logging.info(f"🚀 스케줄 기반 유튜브 감시 루프 시작 (가동시간: 10:00~18:00 KST, 주기: {CHECK_INTERVAL}초)")
-    
-    # 가동 초기화: 현재 채널에 실제 존재하는 최신 영상 ID를 불러와 등록
+    # 가동 초기화: 현재 업비트 채널에 존재하는 기존 영상 ID 등록
     try:
         initial_videos = fetch_latest_videos()
         for v in initial_videos:
             seen_video_ids.add(v["id"])
         save_seen_videos()
-        
-        start_msg = (
-            f"🤖 [업비트 유튜브 감시 봇 실시간 가동 시작]\n"
-            f"⏰ 운영 스케줄: 24시간 상시 감시 중 (날짜/시간 제한 없음)\n"
-            f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
-            f"✅ 업비트 기존 영상 {len(seen_video_ids)}개 등록 완료. (지금부터 새로 올라오는 일반 영상 및 쇼츠 즉시 알림)"
-        )
-        send_telegram_message(start_msg)
     except Exception as e:
         logging.error(f"초기 영상 목록 설정 에러: {e}")
 
     while True:
         try:
-            is_active, reason = is_active_schedule()
+            mode, status_text, detail = get_schedule_status()
+            now = datetime.now(KST)
             
-            if is_active:
+            # 봇 상태 전환 시 텔레그램 알림 즉시 발송
+            if mode != current_bot_mode:
+                current_bot_mode = mode
+                
+                if mode == "MONITORING":
+                    msg = (
+                        f"🟢 [업비트 감시 봇 가동 시작]\n\n"
+                        f"⏰ 현재 상태: 초고속 실시간 감시 실행 중 (5초 주기)\n"
+                        f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                        f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)\n"
+                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료. (신규 영상 등록 시 즉시 알림)"
+                    )
+                    send_telegram_message(msg)
+                    
+                elif mode == "IDLE":
+                    next_time = detail.replace("다음 자동 가동 예정 시각: ", "")
+                    msg = (
+                        f"⏸️ [업비트 감시 봇 대기 모드 전환]\n\n"
+                        f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
+                        f"⏳ 다음 자동 가동 시각: {next_time}\n"
+                        f"📌 감시 채널: {CHANNEL_HANDLE} (업비트 공식 채널)"
+                    )
+                    send_telegram_message(msg)
+                    
+                elif mode == "EXPIRED":
+                    msg = (
+                        f"🏁 [업비트 감시 봇 스케줄 만료]\n\n"
+                        f"📅 지정된 4일간의 가동 스케줄(7/29 ~ 8/1)이 모두 종료되었습니다.\n"
+                        f"📌 현재 상태: 대기 모드 유지 중"
+                    )
+                    send_telegram_message(msg)
+
+            if mode == "MONITORING":
                 videos = fetch_latest_videos()
                 for v in videos:
                     v_id = v["id"]
@@ -200,8 +205,7 @@ def monitor_loop():
                 
                 time.sleep(CHECK_INTERVAL)
             else:
-                # 10:00~18:00 가동 시간이 아닐 때는 유튜브 API 호출을 전혀 하지 않고 30초 간격 대기
-                logging.info(f"⏸️ [스케줄 대기 - API 호출 중단] {reason}")
+                # 대기 모드 중에는 API 호출 없이 30초 간격으로 시각만 체크
                 time.sleep(30)
             
         except Exception as e:
