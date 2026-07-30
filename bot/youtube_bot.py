@@ -16,11 +16,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
-# 가동 스케줄 설정 (오늘 7/29부터 8/1까지 4일간: 매일 오전 10시 ~ 오후 6시 KST)
+# 가동 스케줄 설정 (7/29부터 8/1까지 4일간: 매일 오전 9시 58분 ~ 오후 6시 KST)
 SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
 SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
-ACTIVE_START_HOUR = 10  # 오전 10시
-ACTIVE_END_HOUR = 18    # 오후 6시 (18:00 정각 종료)
+ACTIVE_START_HOUR = 9     # 오전 9시
+ACTIVE_START_MINUTE = 58  # 58분
+ACTIVE_END_HOUR = 18      # 오후 6시 (18:00 정각 종료)
+ACTIVE_END_MINUTE = 0
 
 current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED"
 manual_off_until = None  # 방장의 수동 종료(OFF) 유지 시각
@@ -30,26 +32,30 @@ def get_schedule_status():
     global manual_off_until
     now = datetime.now(KST)
     
+    start_time = now.replace(hour=ACTIVE_START_HOUR, minute=ACTIVE_START_MINUTE, second=0, microsecond=0)
+    end_time = now.replace(hour=ACTIVE_END_HOUR, minute=ACTIVE_END_MINUTE, second=0, microsecond=0)
+    
     # 방장의 수동 종료(/off)가 설정되어 있고 아직 해제 시각 전이면 무조건 IDLE(대기) 상태 유지
     if manual_off_until:
         if now < manual_off_until:
-            return "IDLE", "방장 수동 종료 (대기 모드)", f"다음 자동 가동 예정 시각: {manual_off_until.strftime('%m월 %d일')} 오전 10시 00분"
+            return "IDLE", "방장 수동 종료 (대기 모드)", f"다음 자동 가동 예정 시각: {manual_off_until.strftime('%m월 %d일')} 오전 09시 58분"
         else:
             manual_off_until = None  # 시간이 지나면 수동 종료 해제
     
     if now < SCHEDULE_START_DATE:
-        return "IDLE", "가동 기간 전", f"가동 시작 예정일: {SCHEDULE_START_DATE.strftime('%m월 %d일')} 오전 10시 00분"
+        return "IDLE", "가동 기간 전", f"가동 시작 예정일: {SCHEDULE_START_DATE.strftime('%m월 %d일')} 오전 09시 58분"
     
     if now > SCHEDULE_END_DATE:
         return "EXPIRED", "가동 스케줄 만료", "4일간의 가동 스케줄이 모두 완료되었습니다."
     
-    if ACTIVE_START_HOUR <= now.hour < ACTIVE_END_HOUR:
+    if start_time <= now < end_time:
         return "MONITORING", "실시간 감시 가동 중", f"오늘({now.strftime('%m/%d')}) 오후 18시 00분까지 감시 실행"
     else:
-        if now.hour >= ACTIVE_END_HOUR:
-            next_wake = (now + timedelta(days=1)).strftime("%m월 %d일") + " 오전 10시 00분"
+        if now >= end_time:
+            next_wake_dt = (now + timedelta(days=1)).replace(hour=ACTIVE_START_HOUR, minute=ACTIVE_START_MINUTE, second=0, microsecond=0)
         else:
-            next_wake = now.strftime("%m월 %d일") + " 오전 10시 00분"
+            next_wake_dt = start_time
+        next_wake = next_wake_dt.strftime("%m월 %d일") + " 오전 09시 58분"
         return "IDLE", "대기 모드", f"다음 자동 가동 예정 시각: {next_wake}"
 
 def is_active_schedule():
@@ -140,6 +146,33 @@ def fetch_latest_videos():
 
     return videos
 
+def is_shorts_video(v_id):
+    """YouTube Shorts 영상 여부 판별 (Shorts인 경우 HTTP 200, 롱폼인 경우 303/302 Redirect)"""
+    try:
+        url = f"https://www.youtube.com/shorts/{v_id}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        res = requests.head(url, allow_redirects=False, timeout=5, headers=headers)
+        if res.status_code == 200:
+            return True
+    except Exception as e:
+        logging.warning(f"Shorts 판별 중 예외 발생 ({v_id}): {e}")
+    return False
+
+def sync_existing_videos():
+    """감시 모드 진입 시점 채널의 기존 영상들을 모두 seen_video_ids에 추가하여 오알림 방지"""
+    global seen_video_ids
+    try:
+        videos = fetch_latest_videos()
+        added_count = 0
+        for v in videos:
+            if v["id"] not in seen_video_ids:
+                seen_video_ids.add(v["id"])
+                added_count += 1
+        save_seen_videos()
+        logging.info(f"✅ 기존 영상 동기화 완료 (추가: {added_count}개, 총: {len(seen_video_ids)}개)")
+    except Exception as e:
+        logging.error(f"기존 영상 동기화 중 에러: {e}")
+
 def telegram_command_listener():
     """텔레그램 단톡방 명령어 수신 스레드 (/off, /on, /상태)"""
     global current_bot_mode, manual_off_until
@@ -168,13 +201,13 @@ def telegram_command_listener():
                     if text in ["/off", "off", "종료", "끝"]:
                         if sender_id == ADMIN_USER_ID or sender_id == "":
                             now = datetime.now(KST)
-                            manual_off_until = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+                            manual_off_until = (now + timedelta(days=1)).replace(hour=9, minute=58, second=0, microsecond=0)
                             current_bot_mode = "IDLE"
                             msg = (
                                 f"⏸️ [방장 명령으로 오늘 감시 종료]\n\n"
-                                f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 내일 오전 10시까지 대기 모드로 전환합니다.\n"
+                                f"👮‍♂️ 방장님의 이벤트 종료 신호를 받아 내일 오전 09시 58분까지 대기 모드로 전환합니다.\n"
                                 f"⏰ 현재 상태: 대기 모드 (유튜브 API 호출 0회, 쿼터 소모 0)\n"
-                                f"⏳ 다음 자동 가동 시각: {manual_off_until.strftime('%m월 %d일')} 오전 10시 00분\n"
+                                f"⏳ 다음 자동 가동 시각: {manual_off_until.strftime('%m월 %d일')} 오전 09시 58분\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)"
                             )
                             send_telegram_message(msg)
@@ -186,6 +219,7 @@ def telegram_command_listener():
                     elif text in ["/on", "on", "시작", "가동"]:
                         if sender_id == ADMIN_USER_ID or sender_id == "":
                             manual_off_until = None  # 수동 종료 해제
+                            sync_existing_videos()  # 가동 시작 시 기존 영상 동기화 (오알림 방지)
                             current_bot_mode = "MONITORING"
                             now = datetime.now(KST)
                             msg = (
@@ -193,7 +227,8 @@ def telegram_command_listener():
                                 f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 다시 시작합니다.\n"
                                 f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                                 f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
-                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)"
+                                f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
+                                f"🎬 쇼츠(Shorts) 영상 알림 제외 설정 적용됨"
                             )
                             send_telegram_message(msg)
                         else:
@@ -213,6 +248,7 @@ def telegram_command_listener():
                                 f"🟢 현재 모드: 실시간 감시 모드 가동 중 (5초 주기)\n"
                                 f"⏳ 감시 마감 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
+                                f"🎬 쇼츠(Shorts) 영상 알림 제외 적용 중\n"
                                 f"💡 방장님 전용: '/off'로 대기 전환 가능"
                             )
                         else:
@@ -235,36 +271,32 @@ def monitor_loop():
     """스케줄 기반 유튜브 감시 메인 루프"""
     global seen_video_ids, current_bot_mode
     
-    seen_video_ids = set()
-    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 10:00~18:00 KST)")
+    load_seen_videos()
+    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 09:58~18:00 KST)")
     
     # 가동 초기화: 현재 업비트 채널에 존재하는 기존 영상 ID 등록
-    try:
-        initial_videos = fetch_latest_videos()
-        for v in initial_videos:
-            seen_video_ids.add(v["id"])
-        save_seen_videos()
-    except Exception as e:
-        logging.error(f"초기 영상 목록 설정 에러: {e}")
+    sync_existing_videos()
 
     while True:
         try:
             mode, status_text, detail = get_schedule_status()
             now = datetime.now(KST)
             
-            # 봇 상태 전환 시 텔레그램 알림 즉시 발송
+            # 봇 상태 전환 시 텔레그램 알림 발송 및 영상 목록 동기화
             if mode != current_bot_mode:
-                current_bot_mode = mode
-                
                 if mode == "MONITORING":
+                    # 대기 -> 감시 전환 시점의 채널 영상들을 미리 등록하여 오알림 방지
+                    sync_existing_videos()
+                    
                     msg = (
                         f"🟢 [업비트 감시 봇 가동 시작]\n\n"
                         f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
                         f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
+                        f"🎬 쇼츠(Shorts) 영상 알림 제외 설정 적용됨\n"
                         f"💡 방장님 전용: '/off' 입력 시 대기 전환, '/on' 입력 시 수동 시작\n"
                         f"💡 단톡방 전용: '/상태' 입력 시 현재 모드 확인\n"
-                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료."
+                        f"✅ 기존 영상 {len(seen_video_ids)}개 등록 완료 (오알림 방지)."
                     )
                     send_telegram_message(msg)
                     
@@ -285,13 +317,22 @@ def monitor_loop():
                         f"📌 현재 상태: 대기 모드 유지 중"
                     )
                     send_telegram_message(msg)
+                    
+                current_bot_mode = mode
 
             if mode == "MONITORING":
                 videos = fetch_latest_videos()
                 for v in videos:
                     v_id = v["id"]
                     if v_id not in seen_video_ids:
-                        logging.info(f"🚨 유튜브 API 새 영상 감지!: {v['title']} ({v['link']})")
+                        # 쇼츠 영상인지 체크
+                        if is_shorts_video(v_id):
+                            logging.info(f"🎬 쇼츠(Shorts) 영상 감지되어 알림 제외: {v['title']} ({v['link']})")
+                            seen_video_ids.add(v_id)
+                            save_seen_videos()
+                            continue
+                        
+                        logging.info(f"🚨 유튜브 API 새 롱폼 영상 감지!: {v['title']} ({v['link']})")
                         
                         msg = (
                             f"🚨 [업비트 새 영상 등록 알림]\n\n"
@@ -331,6 +372,7 @@ def home():
     <p><b>스케줄 가동 상태:</b> {status_html}</p>
     <p><b>상세 이유:</b> {reason}</p>
     <p><b>감시 채널:</b> {CHANNEL_HANDLE}</p>
+    <p><b>쇼츠 제외 여부:</b> 적용됨 (롱폼 전용 알림)</p>
     <p><b>감시 주기:</b> {CHECK_INTERVAL}초</p>
     """
 
@@ -344,6 +386,7 @@ def health():
         "schedule_active": is_active,
         "schedule_reason": reason,
         "monitored_channel": CHANNEL_HANDLE,
+        "shorts_filtered": True,
         "seen_count": len(seen_video_ids),
         "check_interval": CHECK_INTERVAL
     })
@@ -354,4 +397,4 @@ monitor_thread.start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)
