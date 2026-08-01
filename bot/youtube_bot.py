@@ -16,13 +16,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
-# 가동 스케줄 설정 (7/29부터 8/1까지 4일간: 매일 오전 9시 58분 ~ 오후 6시 KST)
+# 가동 스케줄 설정 (7/29부터 8/1까지 4일간: 매일 오전 9시 58분 ~ 오후 6시 5분 KST)
 SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
 SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
 ACTIVE_START_HOUR = 9     # 오전 9시
 ACTIVE_START_MINUTE = 58  # 58분
-ACTIVE_END_HOUR = 18      # 오후 6시 (18:00 정각 종료)
-ACTIVE_END_MINUTE = 0
+ACTIVE_END_HOUR = 18      # 오후 6시 (18:05 종료)
+ACTIVE_END_MINUTE = 5
 
 current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED"
 manual_off_until = None  # 방장의 수동 종료(OFF) 유지 시각
@@ -49,7 +49,7 @@ def get_schedule_status():
         return "EXPIRED", "가동 스케줄 만료", "4일간의 가동 스케줄이 모두 완료되었습니다."
     
     if start_time <= now < end_time:
-        return "MONITORING", "실시간 감시 가동 중", f"오늘({now.strftime('%m/%d')}) 오후 18시 00분까지 감시 실행"
+        return "MONITORING", "실시간 감시 가동 중", f"오늘({now.strftime('%m/%d')}) 오후 18시 05분까지 감시 실행"
     else:
         if now >= end_time:
             next_wake_dt = (now + timedelta(days=1)).replace(hour=ACTIVE_START_HOUR, minute=ACTIVE_START_MINUTE, second=0, microsecond=0)
@@ -226,7 +226,7 @@ def telegram_command_listener():
                                 f"🟢 [방장 명령으로 실시간 감시 시작]\n\n"
                                 f"👮‍♂️ 방장님의 수동 가동 신호를 받아 감시 모드를 다시 시작합니다.\n"
                                 f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
-                                f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                                f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 05분까지\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                                 f"🎬 쇼츠(Shorts) 영상 알림 제외 설정 적용됨"
                             )
@@ -246,7 +246,7 @@ def telegram_command_listener():
                             status_msg = (
                                 f"🤖 [업비트 감시 봇 현재 상태]\n\n"
                                 f"🟢 현재 모드: 실시간 감시 모드 가동 중 (5초 주기)\n"
-                                f"⏳ 감시 마감 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                                f"⏳ 감시 마감 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 05분까지\n"
                                 f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                                 f"🎬 쇼츠(Shorts) 영상 알림 제외 적용 중\n"
                                 f"💡 방장님 전용: '/off'로 대기 전환 가능"
@@ -272,7 +272,7 @@ def monitor_loop():
     global seen_video_ids, current_bot_mode
     
     load_seen_videos()
-    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 09:58~18:00 KST)")
+    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 09:58~18:05 KST)")
     
     # 가동 초기화: 현재 업비트 채널에 존재하는 기존 영상 ID 등록
     sync_existing_videos()
@@ -291,7 +291,7 @@ def monitor_loop():
                     msg = (
                         f"🟢 [업비트 감시 봇 가동 시작]\n\n"
                         f"⏰ 현재 상태: 유튜브 API 5초 주기 실시간 감시 실행 중\n"
-                        f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 00분까지\n"
+                        f"⏳ 오늘 감시 종료 예정: 오늘({now.strftime('%m/%d')}) 오후 18시 05분까지\n"
                         f"📌 감시 채널: {CHANNEL_HANDLE} (감시 대상 채널)\n"
                         f"🎬 쇼츠(Shorts) 영상 알림 제외 설정 적용됨\n"
                         f"💡 방장님 전용: '/off' 입력 시 대기 전환, '/on' 입력 시 수동 시작\n"
