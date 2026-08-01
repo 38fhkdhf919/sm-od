@@ -16,9 +16,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
-# 가동 스케줄 설정 (7/29부터 8/1까지 4일간: 매일 오전 9시 58분 ~ 오후 6시 5분 KST)
-SCHEDULE_START_DATE = datetime(2026, 7, 29, 0, 0, 0, tzinfo=KST)
-SCHEDULE_END_DATE = datetime(2026, 8, 1, 23, 59, 59, tzinfo=KST)
+# 가동 스케줄 설정 (8/3 월요일: 오전 9시 58분 ~ 오후 6시 5분 KST)
+SCHEDULE_START_DATE = datetime(2026, 8, 3, 0, 0, 0, tzinfo=KST)
+SCHEDULE_END_DATE = datetime(2026, 8, 3, 23, 59, 59, tzinfo=KST)
 ACTIVE_START_HOUR = 9     # 오전 9시
 ACTIVE_START_MINUTE = 58  # 58분
 ACTIVE_END_HOUR = 18      # 오후 6시 (18:05 종료)
@@ -46,7 +46,7 @@ def get_schedule_status():
         return "IDLE", "가동 기간 전", f"가동 시작 예정일: {SCHEDULE_START_DATE.strftime('%m월 %d일')} 오전 09시 58분"
     
     if now > SCHEDULE_END_DATE:
-        return "EXPIRED", "가동 스케줄 만료", "4일간의 가동 스케줄이 모두 완료되었습니다."
+        return "EXPIRED", "가동 스케줄 만료", "8/3 가동 스케줄이 모두 완료되었습니다."
     
     if start_time <= now < end_time:
         return "MONITORING", "실시간 감시 가동 중", f"오늘({now.strftime('%m/%d')}) 오후 18시 05분까지 감시 실행"
@@ -272,7 +272,7 @@ def monitor_loop():
     global seen_video_ids, current_bot_mode
     
     load_seen_videos()
-    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 7/29~8/1 09:58~18:05 KST)")
+    logging.info("🚀 업비트 유튜브 감시 봇 루프 시작 (스케줄: 8/3 09:58~18:05 KST)")
     
     # 가동 초기화: 현재 업비트 채널에 존재하는 기존 영상 ID 등록
     sync_existing_videos()
@@ -313,7 +313,7 @@ def monitor_loop():
                 elif mode == "EXPIRED":
                     msg = (
                         f"🏁 [업비트 감시 봇 스케줄 만료]\n\n"
-                        f"📅 지정된 4일간의 가동 스케줄(7/29 ~ 8/1)이 모두 종료되었습니다.\n"
+                        f"📅 지정된 가동 스케줄(8/3)이 모두 종료되었습니다.\n"
                         f"📌 현재 상태: 대기 모드 유지 중"
                     )
                     send_telegram_message(msg)
