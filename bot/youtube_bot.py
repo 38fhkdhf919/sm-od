@@ -16,6 +16,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # KST (한국 표준시 UTC+9)
 KST = timezone(timedelta(hours=9))
 
+# 긴급 강제 정지 플래그 (True: 정상 가동, False: 완전히 멈춤)
+BOT_ENABLED = False
+
 # 가동 스케줄 설정 (8/3 월요일: 오전 9시 58분 ~ 오후 6시 5분 KST)
 SCHEDULE_START_DATE = datetime(2026, 8, 3, 0, 0, 0, tzinfo=KST)
 SCHEDULE_END_DATE = datetime(2026, 8, 3, 23, 59, 59, tzinfo=KST)
@@ -24,12 +27,16 @@ ACTIVE_START_MINUTE = 58  # 58분
 ACTIVE_END_HOUR = 18      # 오후 6시 (18:05 종료)
 ACTIVE_END_MINUTE = 5
 
-current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED"
+current_bot_mode = None  # "MONITORING", "IDLE", "EXPIRED", "STOPPED"
 manual_off_until = None  # 방장의 수동 종료(OFF) 유지 시각
 
 def get_schedule_status():
     """현재 한국 시각 기준 봇 가동 상태 및 이유 판별"""
     global manual_off_until
+    
+    if not BOT_ENABLED:
+        return "STOPPED", "🛑 강제 정지 상태", "사용자 긴급 요청으로 유튜브 봇 작동이 전면 중단되었습니다."
+
     now = datetime.now(KST)
     
     start_time = now.replace(hour=ACTIVE_START_HOUR, minute=ACTIVE_START_MINUTE, second=0, microsecond=0)
