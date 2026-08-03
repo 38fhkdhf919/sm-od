@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 KST = timezone(timedelta(hours=9))
 
 # 긴급 강제 정지 플래그 (True: 정상 가동, False: 완전히 멈춤)
-BOT_ENABLED = True
+BOT_ENABLED = False
 
 # 가동 스케줄 설정 (8/3 월요일: 오전 9시 58분 ~ 오후 6시 5분 KST)
 SCHEDULE_START_DATE = datetime(2026, 8, 3, 0, 0, 0, tzinfo=KST)
