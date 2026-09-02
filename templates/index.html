@@ -133,9 +133,10 @@
         <div class="d-flex align-items-center gap-2">
           <label for="selectDays" class="text-secondary small fw-bold text-nowrap"><i class="bi bi-calendar3"></i> 조회기간:</label>
           <select id="selectDays" class="form-select form-select-sm" style="width: 110px;">
+            <option value="2" selected>최근 2일</option>
             <option value="7">최근 7일</option>
             <option value="14">최근 14일</option>
-            <option value="30" selected>최근 30일</option>
+            <option value="30">최근 30일</option>
             <option value="60">최근 60일</option>
           </select>
         </div>
@@ -149,12 +150,12 @@
     <!-- Status Tabs -->
     <ul class="nav nav-pills mb-4 bg-white p-2 rounded-4 border shadow-sm" id="statusTabs">
       <li class="nav-item flex-fill text-center">
-        <button class="nav-link active w-100" data-status="PAYED">
+        <button class="nav-link w-100" data-status="PAYED">
           <i class="bi bi-bell-fill me-1 text-warning"></i> 신규주문
         </button>
       </li>
       <li class="nav-item flex-fill text-center">
-        <button class="nav-link w-100" data-status="PREPARING">
+        <button class="nav-link active w-100" data-status="PREPARING">
           <i class="bi bi-box-seam-fill me-1 text-info"></i> 발주확인
         </button>
       </li>
@@ -210,9 +211,30 @@
     const copyToastEl = document.getElementById('copyToast');
     const copyToast = new bootstrap.Toast(copyToastEl, { delay: 2500 });
 
-    let currentStatus = 'PAYED';
+    let currentStatus = localStorage.getItem('selectedStatus') || 'PREPARING';
+    let currentAbortController = null;
+
+    // Apply saved or default tab status
+    statusTabs.querySelectorAll('.nav-link').forEach(btn => {
+      if (btn.getAttribute('data-status') === currentStatus) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    // Apply saved or default date range
+    const savedDays = localStorage.getItem('selectedDays') || '2';
+    if (selectDays) {
+      selectDays.value = savedDays;
+    }
 
     async function loadOrders() {
+      if (currentAbortController) {
+        currentAbortController.abort();
+      }
+      currentAbortController = new AbortController();
+
       statusAlert.classList.add('d-none');
       orderListContainer.innerHTML = `
         <div class="text-center py-5">
@@ -221,10 +243,13 @@
         </div>`;
 
       const isMock = toggleMock.checked;
-      const days = selectDays ? selectDays.value : 30;
+      const days = selectDays ? selectDays.value : 2;
 
       try {
-        const response = await fetch(`/api/orders?mock=${isMock}&status=${currentStatus}&days=${days}`);
+        const response = await fetch(`/api/orders?mock=${isMock}&status=${currentStatus}&days=${days}&_t=${Date.now()}`, {
+          signal: currentAbortController.signal,
+          headers: { 'Cache-Control': 'no-cache' }
+        });
         const data = await response.json();
 
         if (data.error) {
@@ -251,6 +276,7 @@
 
         renderOrders(data.orders);
       } catch (err) {
+        if (err.name === 'AbortError') return;
         orderListContainer.innerHTML = `
           <div class="col-12 alert alert-danger">
             <i class="bi bi-exclamation-triangle-fill me-2"></i> 주문 수집 중 오류가 발생했습니다: ${err.message}
@@ -308,14 +334,20 @@
       targetBtn.classList.add('active');
 
       currentStatus = targetBtn.getAttribute('data-status');
+      localStorage.setItem('selectedStatus', currentStatus);
       loadOrders();
     });
 
     toggleMock.addEventListener('change', loadOrders);
-    if (selectDays) selectDays.addEventListener('change', loadOrders);
+    if (selectDays) {
+      selectDays.addEventListener('change', () => {
+        localStorage.setItem('selectedDays', selectDays.value);
+        loadOrders();
+      });
+    }
     btnRefresh.addEventListener('click', loadOrders);
 
-    // Initial load
+    // Initial load immediately
     loadOrders();
   </script>
 </body>

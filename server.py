@@ -20,8 +20,8 @@ def index():
 def get_orders():
     try:
         is_mock = request.args.get("mock", "false").lower() == "true"
-        status_filter = request.args.get("status", "PAYED").upper()
-        days = int(request.args.get("days", 30))
+        status_filter = request.args.get("status", "PREPARING").upper()
+        days = int(request.args.get("days", 2))
         
         raw_orders_list = []
         error_msg = None
@@ -50,19 +50,25 @@ def get_orders():
                 "formattedText": format_order_to_text(order)
             })
 
-        return jsonify({
+        resp = jsonify({
             "success": True,
             "error": error_msg,
             "isMock": is_mock,
             "statusFilter": status_filter,
             "orders": formatted_orders
         })
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
     except Exception as e:
-        return jsonify({
+        resp = jsonify({
             "success": False,
             "error": f"서버 연동 오류: {str(e)}",
             "orders": []
         })
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
