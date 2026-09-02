@@ -41,11 +41,11 @@ def parse_weight_value(w_str):
     return 0.0
 
 def parse_size_value(s_str):
-    """Extracts numerical ring size for sorting (e.g. '17호' -> 17)"""
+    """Extracts numerical ring size for sorting (e.g. '17호' -> 17.0, '12.5호' -> 12.5)"""
     if not s_str:
-        return 0
-    m = re.search(r'(\d+)', str(s_str))
-    return int(m.group(1)) if m else 0
+        return 0.0
+    m = re.search(r'(\d+(?:\.\d+)?)', str(s_str))
+    return float(m.group(1)) if m else 0.0
 
 def parse_item_details(item):
     """
@@ -77,13 +77,19 @@ def parse_item_details(item):
     elif "24K" in full_text or "24k" in full_text or "순금" in full_text:
         karat = "24K"
 
-    # 2. Weight
-    weight = ""
-    m_weight = re.search(r'(\d+(?:\.\d+)?\s*(?:푼|돈))', value_text)
-    if not m_weight:
-        m_weight = re.search(r'(\d+(?:\.\d+)?\s*(?:푼|돈))', full_text)
-    if m_weight:
-        weight = m_weight.group(1).replace(" ", "")
+    # 2. Weights found
+    weights_found = []
+    for w in re.findall(r'(\d+(?:\.\d+)?\s*(?:푼|돈))', value_text):
+        w_clean = w.replace(" ", "")
+        if w_clean not in weights_found:
+            weights_found.append(w_clean)
+    if not weights_found:
+        for w in re.findall(r'(\d+(?:\.\d+)?\s*(?:푼|돈))', full_text):
+            w_clean = w.replace(" ", "")
+            if w_clean not in weights_found:
+                weights_found.append(w_clean)
+
+    weight = weights_found[0] if weights_found else ""
 
     # 3. Product Type
     product_type = "평반지"
@@ -119,17 +125,17 @@ def parse_item_details(item):
                 luster = "**무광**"
                 break
 
-    # 6. Sizes found
+    # 6. Sizes found (supports integers like 13호, decimals like 12.5호, multiple sizes like 13호, 17호)
     sizes_found = []
     for opt_str in options:
-        m = re.search(r'(?:사이즈|호수)[^\:]*:\s*(\d+\s*호)', str(opt_str))
-        if m:
-            s_val = m.group(1).replace(" ", "")
+        matches = re.findall(r'(\d+(?:\.\d+)?\s*호)(?!\s*이하|\s*이상)', str(opt_str))
+        for s in matches:
+            s_val = s.replace(" ", "")
             if s_val not in sizes_found:
                 sizes_found.append(s_val)
 
     if not sizes_found:
-        all_matches = re.findall(r'(\d+\s*호)(?!\s*이하|\s*이상)', full_text)
+        all_matches = re.findall(r'(\d+(?:\.\d+)?\s*호)(?!\s*이하|\s*이상)', full_text)
         for s in all_matches:
             s_val = s.replace(" ", "")
             if s_val not in sizes_found:
@@ -145,24 +151,25 @@ def parse_item_details(item):
             m_memo = re.search(r'기타메모[^\:]*:\s*([^/]+)', opt_str)
             if m_memo and not raw_memo:
                 val = m_memo.group(1).strip()
-                if val not in ["없음", "없음 입력", "각인안함", "none", "None", "-"]:
+                if val not in ["없음", "없음 입력", "각인안함", "none", "None", "-", "."]:
                     raw_memo = val
 
             m_font = re.search(r'글씨체[^\:]*:\s*([^/]+)', opt_str)
             if m_font and not raw_font:
                 val = m_font.group(1).strip()
-                if val not in ["없음", "선택안함", "각인안함", "none", "None", "-"]:
+                if val not in ["없음", "선택안함", "각인안함", "none", "None", "-", "."]:
                     raw_font = val
 
-    if raw_memo in ["없음", "없음 입력", "각인안함", "none", "None", "-"]:
+    if raw_memo in ["없음", "없음 입력", "각인안함", "none", "None", "-", "."]:
         raw_memo = ""
-    if raw_font in ["없음", "선택안함", "각인안함", "none", "None", "-"]:
+    if raw_font in ["없음", "선택안함", "각인안함", "none", "None", "-", "."]:
         raw_font = ""
 
     return {
         "karat": karat,
         "product_type": product_type,
         "weight": weight,
+        "weights": weights_found,
         "color": color,
         "luster": luster,
         "sizes": sizes_found,
@@ -307,81 +314,131 @@ def format_order_to_text(order_item):
     sub_items = order_item.get("subItems", [])
     parsed_main = parse_item_details(order_item)
 
-    # Extract distinct ring entries
-    ring_entries = []
-    
+    # 1. Collect size items and weight items with quantity expansion
+    size_entries = []
+    weight_entries = []
+
     if sub_items:
-        size_items = []
-        weight_items = []
-        
         for sub in sub_items:
             parsed_sub = parse_item_details(sub)
-            if parsed_sub["sizes"]:
-                size_items.append((sub, parsed_sub))
-            if parsed_sub["weight"]:
-                weight_items.append((sub, parsed_sub))
+            qty = max(1, int(sub.get("quantity", 1)))
 
-        if len(size_items) > 1:
-            # Rule: Sort sizes descending (larger size first)
-            size_items.sort(key=lambda x: parse_size_value(x[1]["sizes"][0]), reverse=True)
-            # Sort weights descending (heavier weight first)
-            weight_items.sort(key=lambda x: parse_weight_value(x[1]["weight"]), reverse=True)
-
-            for i, (sub, p_sub) in enumerate(size_items):
-                # Larger size matches heavier weight
-                if i < len(weight_items):
-                    w = weight_items[i][1]["weight"]
+            # Collect sizes
+            sub_sizes = parsed_sub.get("sizes", [])
+            if sub_sizes:
+                if len(sub_sizes) == 1:
+                    for _ in range(qty):
+                        size_entries.append({
+                            "size": sub_sizes[0],
+                            "engraving_content": parsed_sub["engraving_content"],
+                            "engraving_font": parsed_sub["engraving_font"],
+                            "sub": sub
+                        })
                 else:
-                    w = p_sub["weight"] or parsed_main["weight"]
-                    
-                sz = p_sub["sizes"][0] if p_sub["sizes"] else ""
-                memo = p_sub["engraving_content"] or parsed_main["engraving_content"]
-                font = p_sub["engraving_font"] or parsed_main["engraving_font"]
-                
-                sub_rec = sub.get("recipientName") or order_item.get("recipientName", "")
-                sub_phone = sub.get("recipientPhone") or order_item.get("recipientPhone", "")
-                sub_base = sub.get("baseAddress") or order_item.get("baseAddress", "")
-                sub_detail = sub.get("detailAddress") or order_item.get("detailAddress", "")
-                sub_addr = f"{sub_base}, {sub_detail}".strip(", ")
-                sub_deadline = sub.get("shippingDeadline") or order_item.get("shippingDeadline", "")
+                    for sz in sub_sizes:
+                        size_entries.append({
+                            "size": sz,
+                            "engraving_content": parsed_sub["engraving_content"],
+                            "engraving_font": parsed_sub["engraving_font"],
+                            "sub": sub
+                        })
 
-                ring_entries.append({
-                    "weight": w,
-                    "size": sz,
-                    "engraving_content": memo,
-                    "engraving_font": font,
-                    "recipient": sub_rec,
-                    "phone": sub_phone,
-                    "address": sub_addr,
-                    "deadline": sub_deadline
+            # Collect weights
+            sub_weights = parsed_sub.get("weights", [])
+            if not sub_weights and parsed_sub.get("weight"):
+                sub_weights = [parsed_sub["weight"]]
+
+            if sub_weights:
+                if len(sub_weights) == 1:
+                    for _ in range(qty):
+                        weight_entries.append(sub_weights[0])
+                else:
+                    for w in sub_weights:
+                        weight_entries.append(w)
+
+    # Fallback if no sub_items or sizes not found in sub_items
+    if not size_entries:
+        main_sizes = parsed_main.get("sizes", [])
+        total_q = max(1, int(order_item.get("totalQuantity") or order_item.get("quantity") or 1))
+        if len(main_sizes) == 1:
+            for _ in range(total_q):
+                size_entries.append({
+                    "size": main_sizes[0],
+                    "engraving_content": parsed_main["engraving_content"],
+                    "engraving_font": parsed_main["engraving_font"],
+                    "sub": order_item
                 })
-
-    if not ring_entries:
-        sizes = parsed_main["sizes"]
-        if len(sizes) > 1:
-            sorted_sizes = sorted(sizes, key=parse_size_value, reverse=True)
-            for sz in sorted_sizes:
-                ring_entries.append({
-                    "weight": parsed_main["weight"],
+        elif len(main_sizes) > 1:
+            for sz in main_sizes:
+                size_entries.append({
                     "size": sz,
                     "engraving_content": parsed_main["engraving_content"],
                     "engraving_font": parsed_main["engraving_font"],
-                    "recipient": order_item.get("recipientName", ""),
-                    "phone": order_item.get("recipientPhone", ""),
-                    "address": f"{order_item.get('baseAddress', '')}, {order_item.get('detailAddress', '')}".strip(", "),
-                    "deadline": order_item.get("shippingDeadline", "")
+                    "sub": order_item
                 })
         else:
-            ring_entries.append({
-                "weight": parsed_main["weight"],
-                "size": sizes[0] if sizes else "",
-                "engraving_content": parsed_main["engraving_content"],
-                "engraving_font": parsed_main["engraving_font"],
-                "recipient": order_item.get("recipientName", ""),
-                "phone": order_item.get("recipientPhone", ""),
-                "address": f"{order_item.get('baseAddress', '')}, {order_item.get('detailAddress', '')}".strip(", "),
-                "deadline": order_item.get("shippingDeadline", "")
-            })
+            for _ in range(total_q):
+                size_entries.append({
+                    "size": "",
+                    "engraving_content": parsed_main["engraving_content"],
+                    "engraving_font": parsed_main["engraving_font"],
+                    "sub": order_item
+                })
+
+    if not weight_entries:
+        main_weights = parsed_main.get("weights", [])
+        if not main_weights and parsed_main.get("weight"):
+            main_weights = [parsed_main["weight"]]
+        total_q = max(1, len(size_entries))
+        if len(main_weights) == 1:
+            for _ in range(total_q):
+                weight_entries.append(main_weights[0])
+        elif len(main_weights) > 1:
+            for w in main_weights:
+                weight_entries.append(w)
+        else:
+            for _ in range(total_q):
+                weight_entries.append("")
+
+    # 2. Sort sizes and weights ASCENDING so smaller weight pairs with smaller size, and larger weight pairs with larger size
+    # E.g. 8푼 <-> 13호, 1돈 <-> 17호 (작은 호수에 가벼운 중량, 큰 호수에 무거운 중량 매칭)
+    size_entries.sort(key=lambda x: parse_size_value(x["size"]))
+    weight_entries.sort(key=lambda w: parse_weight_value(w))
+
+    # 3. Match sizes with weights
+    ring_entries = []
+    default_weight = weight_entries[0] if weight_entries else parsed_main["weight"]
+    default_rec = order_item.get("recipientName", "")
+    default_phone = order_item.get("recipientPhone", "")
+    default_base = order_item.get("baseAddress", "")
+    default_detail = order_item.get("detailAddress", "")
+    default_addr = f"{default_base}, {default_detail}".strip(", ")
+    default_deadline = order_item.get("shippingDeadline", "")
+
+    for i, s_ent in enumerate(size_entries):
+        sub = s_ent.get("sub", order_item)
+        w = weight_entries[i] if i < len(weight_entries) else default_weight
+        sz = s_ent["size"]
+        memo = s_ent["engraving_content"] or parsed_main["engraving_content"]
+        font = s_ent["engraving_font"] or parsed_main["engraving_font"]
+
+        sub_rec = sub.get("recipientName") or default_rec
+        sub_phone = sub.get("recipientPhone") or default_phone
+        sub_base = sub.get("baseAddress") or default_base
+        sub_detail = sub.get("detailAddress") or default_detail
+        sub_addr = f"{sub_base}, {sub_detail}".strip(", ") or default_addr
+        sub_deadline = sub.get("shippingDeadline") or default_deadline
+
+        ring_entries.append({
+            "weight": w,
+            "size": sz,
+            "engraving_content": memo,
+            "engraving_font": font,
+            "recipient": sub_rec,
+            "phone": sub_phone,
+            "address": sub_addr,
+            "deadline": sub_deadline
+        })
 
     # Common traits
     karat = parsed_main["karat"]
@@ -389,7 +446,21 @@ def format_order_to_text(order_item):
     color = parsed_main["color"]
     luster = parsed_main["luster"]
 
-    is_multi = len(ring_entries) > 1
+    # Check if all ring entries are identical (same weight, same size, same engraving)
+    all_identical = False
+    if len(ring_entries) > 1:
+        first_r = ring_entries[0]
+        all_identical = all(
+            r["size"] == first_r["size"] and
+            r["weight"] == first_r["weight"] and
+            r["engraving_content"] == first_r["engraving_content"] and
+            r["engraving_font"] == first_r["engraving_font"]
+            for r in ring_entries
+        )
+
+    # If all items are identical (e.g. 18호 1돈 2개): format as single item with '수량 : N개'
+    # If items are different (e.g. 13호 8푼, 17호 1돈): format as multi item list (1. 8푼 13호, 2. 1돈 17호)
+    is_multi = (len(ring_entries) > 1) and not all_identical
 
     lines = [
         "[주문정보]",
@@ -400,7 +471,16 @@ def format_order_to_text(order_item):
     ]
 
     if not is_multi:
-        entry = ring_entries[0]
+        entry = ring_entries[0] if ring_entries else {
+            "weight": parsed_main["weight"],
+            "size": parsed_main["sizes"][0] if parsed_main["sizes"] else "",
+            "engraving_content": parsed_main["engraving_content"],
+            "engraving_font": parsed_main["engraving_font"],
+            "recipient": default_rec,
+            "phone": default_phone,
+            "address": default_addr,
+            "deadline": default_deadline
+        }
         parts = []
         if karat: parts.append(karat)
         if prod_type: parts.append(prod_type)
@@ -411,6 +491,11 @@ def format_order_to_text(order_item):
         
         prod_text = " ".join(parts) if parts else order_item.get("productName", "")
         lines.append(f"제품 : {prod_text}")
+
+        # If quantity is 2 or more, clearly indicate quantity
+        total_q = len(ring_entries)
+        if total_q >= 2:
+            lines.append(f"수량 : {total_q}개")
 
         memo = entry["engraving_content"]
         font = entry["engraving_font"]
