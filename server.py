@@ -19,9 +19,9 @@ def index():
 @app.route("/api/orders", methods=["GET"])
 def get_orders():
     try:
-        is_mock = request.args.get("mock", "true").lower() == "true"
+        is_mock = request.args.get("mock", "false").lower() == "true"
         status_filter = request.args.get("status", "PAYED").upper()
-        days = int(request.args.get("days", 10))
+        days = int(request.args.get("days", 30))
         
         raw_orders_list = []
         error_msg = None

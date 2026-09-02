@@ -1,5 +1,13 @@
 import sys
 import json
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 from naver_api import NaverCommerceAPI, get_mock_orders
 from order_formatter import format_order_to_text
 

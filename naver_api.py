@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import base64
@@ -7,6 +8,15 @@ import urllib.parse
 import requests
 import bcrypt
 import jwt
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+KST = datetime.timezone(datetime.timedelta(hours=9))
 
 class NaverCommerceAPI:
     def __init__(self, config_path="config.json"):
@@ -102,16 +112,17 @@ class NaverCommerceAPI:
             print(f"[NaverAPI Exception] {e}")
             return None
 
-    def fetch_product_orders(self, days=10):
+    def fetch_product_orders(self, days=30):
         """
         Fetches changed product orders for past `days`.
-        Chunks into 24-hour windows with 0.25s delay & auto-retry on 429 rate limit.
+        Chunks into 24-hour windows with 0.15s delay & auto-retry on 429 rate limit.
+        Uses KST (UTC+9) timezone to prevent timestamp discrepancies on UTC servers.
         """
         token = self.get_access_token()
         if not token:
             return None
 
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(KST)
         all_statuses = []
 
         for day_offset in range(days):
@@ -156,7 +167,7 @@ class NaverCommerceAPI:
             except Exception as e:
                 print(f"[NaverAPI Exception] {e}")
 
-            time.sleep(0.25)
+            time.sleep(0.15)
 
         return {"data": {"lastChangeStatuses": all_statuses}}
 
@@ -213,16 +224,19 @@ def extract_product_order_ids(raw_orders, status_filter="PAYED"):
         items = data.get("lastChangeStatuses", data.get("content", data.get("lastChangedStatuses", [])))
 
     status_filter = status_filter.upper()
-    target_statuses = []
     
-    if status_filter == "PAYED":
-        target_statuses = ["PAYED", "PAYMENT_WAITING"]
-    elif status_filter == "PREPARING":
-        target_statuses = ["PREPARING", "PLACE", "DISPATCHED"]
+    # 네이버 커머스 API 특성:
+    # '신규주문(결제완료)'과 '발주확인(상품준비중)'은 둘 다 productOrderStatus == 'PAYED'입니다.
+    # 발주확인 여부(placeOrderStatus == 'OK')는 상품 주문 상세(query_order_details)에서 조회되므로,
+    # PAYED 및 PREPARING 탭 모두 결제완료 주문번호를 조회 대상으로 포함합니다.
+    if status_filter in ["PAYED", "PREPARING"]:
+        target_statuses = ["PAYED", "PAYMENT_WAITING", "PREPARING", "PLACE", "DISPATCHED"]
     elif status_filter == "DELIVERED":
-        target_statuses = ["DELIVERED", "DELIVERING", "DELIVERY_COMPLETED"]
+        target_statuses = ["DELIVERED", "DELIVERING", "DELIVERY_COMPLETED", "DISPATCHED"]
     elif status_filter == "PURCHASE_DECIDED":
         target_statuses = ["PURCHASE_DECIDED"]
+    else:  # ALL
+        target_statuses = []
 
     product_order_ids = []
     if isinstance(items, list):
@@ -246,7 +260,7 @@ def extract_product_order_ids(raw_orders, status_filter="PAYED"):
             elif isinstance(item, str):
                 product_order_ids.append(item)
                 
-    return product_order_ids
+    return list(set(product_order_ids))
 
 def extract_orders_list(orders_detail, status_filter="PAYED"):
     if not isinstance(orders_detail, dict):
@@ -263,29 +277,30 @@ def extract_orders_list(orders_detail, status_filter="PAYED"):
     if status_filter == "ALL":
         return raw_list
 
-    target_statuses = []
-    if status_filter == "PAYED":
-        target_statuses = ["PAYED", "PAYMENT_WAITING"]
-    elif status_filter == "PREPARING":
-        target_statuses = ["PREPARING", "PLACE", "DISPATCHED"]
-    elif status_filter == "DELIVERED":
-        target_statuses = ["DELIVERED", "DELIVERING", "DELIVERY_COMPLETED"]
-    elif status_filter == "PURCHASE_DECIDED":
-        target_statuses = ["PURCHASE_DECIDED"]
-
     filtered_list = []
     for item in raw_list:
         if isinstance(item, dict):
-            prod_order = item.get("productOrder", {})
+            prod_order = item.get("productOrder", item)
             st_order = prod_order.get("productOrderStatus", "").upper()
             st_changed = prod_order.get("lastChangedType", "").upper()
+            place_order_status = str(prod_order.get("placeOrderStatus", "")).upper()
 
             is_match = False
-            if status_filter == "DELIVERED":
+            if status_filter == "PAYED":
+                # 신규주문 (결제완료, 아직 발주 미확인 상태: placeOrderStatus != 'OK')
+                if (st_order in ["PAYED", "PAYMENT_WAITING"] or st_changed in ["PAYED", "PAYMENT_WAITING"]) and place_order_status != "OK":
+                    is_match = True
+            elif status_filter == "PREPARING":
+                # 발주확인 (판매자가 스마트스토어에서 발주확인 완료하여 상품준비중인 상태):
+                # 결제완료(PAYED) 상태에서 placeOrderStatus가 'OK'인 주문 (배송완료나 구매확정으로 넘어간 주문 제외)
+                if (st_order in ["PAYED", "PREPARING", "PLACE"] and place_order_status == "OK") or st_order in ["PREPARING", "PLACE"]:
+                    is_match = True
+            elif status_filter == "DELIVERED":
+                target_statuses = ["DELIVERED", "DELIVERING", "DELIVERY_COMPLETED", "DISPATCHED"]
                 if st_order in target_statuses or (st_changed in target_statuses and st_order != "PURCHASE_DECIDED") or st_order == "DELIVERED":
                     is_match = True
-            else:
-                if st_order in target_statuses or st_changed in target_statuses:
+            elif status_filter == "PURCHASE_DECIDED":
+                if st_order == "PURCHASE_DECIDED" or st_changed == "PURCHASE_DECIDED":
                     is_match = True
 
             if is_match:
@@ -304,6 +319,7 @@ def get_mock_orders(status_filter="PAYED"):
                 "productOrderId": "2026072589012341",
                 "orderId": "2026072512345671",
                 "productOrderStatus": "PAYED",
+                "placeOrderStatus": "NOT_YET",
                 "paymentAmount": 425000,
                 "settlementAmount": 403750,
                 "productName": "엥게이지 커플링 18K 14K 금반지 우정 애끼 민자 이니셜 실반지 선물 / 18K 5푼(1.875 g) / 24호이하 / 유광 / 옐로골드",
@@ -329,7 +345,8 @@ def get_mock_orders(status_filter="PAYED"):
             {
                 "productOrderId": "2026072489012342",
                 "orderId": "2026072412345672",
-                "productOrderStatus": "PREPARING",
+                "productOrderStatus": "PAYED",
+                "placeOrderStatus": "OK",
                 "paymentAmount": 820000,
                 "settlementAmount": 779000,
                 "productName": "14K 데일리 가드링 **유광**",

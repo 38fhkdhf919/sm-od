@@ -281,6 +281,7 @@ def group_orders_by_order_id(raw_orders_list):
             "orderId": order_id,
             "productOrderId": first_po.get("productOrderId", order_id),
             "productOrderStatus": first_po.get("productOrderStatus", first_po.get("lastChangedType", "")),
+            "placeOrderStatus": first_po.get("placeOrderStatus", ""),
             "paymentAmount": total_payment,
             "settlementAmount": total_settlement,
             "margin": None,
